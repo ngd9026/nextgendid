@@ -5,9 +5,11 @@ use rand::rngs::OsRng;
 use rand::RngCore;
 use sha2::{Sha512, Digest};
 use std::collections::HashMap;
+use std::sync::Mutex;
+use lazy_static::lazy_static;
 
 /// Helper: Generates a random scalar.
-fn random_scalar() -> Scalar {
+pub fn random_scalar() -> Scalar {
     let mut rng = OsRng;
     let mut bytes = [0u8; 32];
     rng.fill_bytes(&mut bytes);
@@ -15,9 +17,8 @@ fn random_scalar() -> Scalar {
 }
 
 /// Helper: Derives a scalar from the SHA-512 hash of the input.
-fn scalar_from_hash(data: &[u8]) -> Scalar {
+pub fn scalar_from_hash(data: &[u8]) -> Scalar {
     let mut hasher = Sha512::new();
-    // Fully qualify update to avoid ambiguity.
     sha2::digest::Update::update(&mut hasher, data);
     let hash = hasher.finalize();
     let mut wide = [0u8; 64];
@@ -26,7 +27,7 @@ fn scalar_from_hash(data: &[u8]) -> Scalar {
 }
 
 /// Helper: Hashes a message to a Ristretto point.
-fn hash_to_point(message: &[u8]) -> RistrettoPoint {
+pub fn hash_to_point(message: &[u8]) -> RistrettoPoint {
     let hash = Sha512::digest(message);
     let mut bytes = [0u8; 64];
     bytes.copy_from_slice(&hash);
@@ -151,7 +152,7 @@ pub mod credential {
             issuers.push(CredentialIssuer {
                 sk,
                 pk,
-                agg_scalar: Scalar::default(), // default() is our zero.
+                agg_scalar: Scalar::default(), // default() represents zero.
             });
             pks.push(pk);
         }
@@ -180,10 +181,8 @@ pub mod credential {
 /// Identity Module: Interactive protocol between user and trusted identity issuer.
 /// -------------------------------------------------------------------------
 pub mod identity {
-    // Change the import from crate::vrf to super::vrf so that the sibling module is used.
-    use super::vrf;
-
     use super::*;
+    use super::vrf;
 
     /// The identity issuer’s keys.
     pub struct IdentityIssuer {
@@ -198,7 +197,6 @@ pub mod identity {
     /// 3. Computing the VRF output and proof.
     pub fn setup(user_id: &str) -> (IdentityIssuer, RistrettoPoint, vrf::VRFProof) {
         let keypair = vrf::keygen();
-        // Simulate binding the user's identity by hashing the user_id.
         let s = scalar_from_hash(user_id.as_bytes());
         let (y_s, proof) = vrf::prove(&keypair.sk, &s.to_bytes());
         (IdentityIssuer { sk: keypair.sk, vk: keypair.pk }, y_s, proof)
@@ -235,11 +233,19 @@ pub fn system_setup(_lambda: usize, l: usize) -> PublicParameters {
 }
 
 /// -------------------------------------------------------------------------
+/// Global State
+/// -------------------------------------------------------------------------
+lazy_static! {
+    pub static ref TKN_CNT_SET: Mutex<Vec<RistrettoPoint>> = Mutex::new(vec![]);
+    pub static ref T_APP: Mutex<Vec<Vec<u8>>> = Mutex::new(vec![]);
+}
+
+/// -------------------------------------------------------------------------
 /// Run: Demonstrates system setup and the various module operations.
 /// -------------------------------------------------------------------------
 pub fn run() {
-    let lambda = 128; // Security parameter (illustrative)
-    let l = 3; // For example, 3 attributes (Pedersen commitments require l+1 generators)
+    let lambda = 128;
+    let l = 3;
     let public_params = system_setup(lambda, l);
 
     println!("--- System Setup ---");
@@ -250,7 +256,7 @@ pub fn run() {
         println!("  Generator {}: {:?}", i, g.compress());
     }
 
-    // Identity Issuer Setup Example
+    // Identity Issuer Setup Demo
     let user_id = "user123";
     let (identity_issuer, y_s, proof) = identity::setup(user_id);
     println!("\n--- Identity Issuer Setup ---");
@@ -259,8 +265,8 @@ pub fn run() {
     println!("VRF output (y_s): {:?}", y_s.compress());
     println!("VRF proof: c = {:?}, r = {:?}", proof.c, proof.r);
 
-    // Credential Issuer Setup Example
-    let n = 5; // For example, 5 trusted credential issuers.
+    // Credential Issuer Setup Demo
+    let n = 5;
     let (issuers, cred_public_params) = credential::setup(n);
     println!("\n--- Credential Issuer Setup ---");
     for (i, issuer) in issuers.iter().enumerate() {
